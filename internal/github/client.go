@@ -155,7 +155,7 @@ func (c *Client) request(ctx context.Context, method, path, media string, payloa
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	readLimit := limit
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		readLimit = 4096
