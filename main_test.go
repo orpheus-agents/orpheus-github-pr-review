@@ -45,13 +45,13 @@ func TestFailuresEmitJSONAndExitOne(t *testing.T) {
 		{
 			name:      "missing configuration",
 			msg:       "failed to load configuration",
-			errorText: "GITHUB_REPOSITORIES is required",
+			errorText: "GITHUB_TOKEN is required",
 		},
 		{
 			name:      "configuration failure with fatal log level",
 			env:       []string{"LOG_LEVEL=fatal"},
 			msg:       "failed to load configuration",
-			errorText: "GITHUB_REPOSITORIES is required",
+			errorText: "GITHUB_TOKEN is required",
 		},
 		{
 			name:       "malformed configuration file",
@@ -106,7 +106,6 @@ func TestFailuresEmitJSONAndExitOne(t *testing.T) {
 			}
 			if tt.msg != "failed to load configuration" {
 				cmd.Env = append(cmd.Env,
-					"GITHUB_REPOSITORIES=team/repository",
 					"GITHUB_TOKEN=test-token",
 					"ORPHEUS_BASE_URL=https://orpheus.example.com",
 					"ORPHEUS_API_KEY=test-key",

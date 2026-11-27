@@ -83,8 +83,12 @@ func (c *Client) ListPullRequestsForReview(ctx context.Context, reviewerID int64
 	if reviewerID <= 0 || reviewerID != c.viewer.ID {
 		return nil, errors.New("invalid GitHub reviewer identity")
 	}
+	repositories, err := c.refreshRepositories(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var candidates []PullRequest
-	for _, repository := range c.repositories {
+	for _, repository := range repositories {
 		owner, repo, _ := strings.Cut(repository.FullName, "/")
 		var cursor *string
 		for {

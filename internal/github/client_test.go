@@ -130,3 +130,77 @@ func TestSubmitReviewUsesNativeCommentReview(t *testing.T) {
 		repositories: []Repository{{ID: 12, FullName: "org/repo"}}}
 	require.NoError(t, client.SubmitReview(context.Background(), 12, 23, 11, "finished"))
 }
+
+func TestDiscoveryRefreshesAccessibleRepositoriesAndHonorsOptionalLimit(t *testing.T) {
+	t.Parallel()
+
+	var changed atomic.Bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /user/repos", func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		if changed.Load() {
+			if page == "1" {
+				_, _ = w.Write([]byte(`[
+				  {"id":12,"full_name":"org/previous","clone_url":"https://github.com/org/previous.git","permissions":{"push":false}},
+				  {"id":16,"full_name":"OtherOrg/NewRepo","clone_url":"https://github.com/OtherOrg/NewRepo.git","permissions":{"push":true}},
+				  {"id":17,"full_name":"another/available","clone_url":"https://github.com/another/available.git","permissions":{"push":true}}
+				]`))
+			}
+			return
+		}
+		if page == "2" {
+			_, _ = w.Write([]byte(`[{"id":12,"full_name":"org/previous","clone_url":"https://github.com/org/previous.git","permissions":{"push":true}}]`))
+			return
+		}
+		items := make([]any, 100)
+		for index := range items {
+			items[index] = map[string]any{"id": 100 + index, "archived": true, "permissions": map[string]bool{"push": true}}
+		}
+		_ = json.NewEncoder(w).Encode(items)
+	})
+	mux.HandleFunc("POST /graphql", func(w http.ResponseWriter, r *http.Request) {
+		var payload struct{ Variables map[string]string }
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid discovery request", http.StatusBadRequest)
+			return
+		}
+		ids := map[string]int64{"org/previous": 12, "OtherOrg/NewRepo": 16, "another/available": 17}
+		repository := payload.Variables["owner"] + "/" + payload.Variables["repo"]
+		id := ids[repository]
+		if id == 0 {
+			http.Error(w, "unexpected repository", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"repository": map[string]any{
+			"databaseId": id,
+			"pullRequests": map[string]any{"nodes": []any{
+				map[string]any{"number": 23, "reviewRequests": map[string]any{"nodes": []any{
+					map[string]any{"requestedReviewer": map[string]int64{"databaseId": 17}},
+				}}},
+				map[string]any{"number": 24, "reviewRequests": map[string]any{"nodes": []any{
+					map[string]any{"requestedReviewer": map[string]int64{"databaseId": 99}},
+				}}},
+			}},
+		}}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := &Client{http: server.Client(), origin: server.URL, viewer: User{ID: 17, Username: "reviewer"}}
+
+	pulls, err := client.ListPullRequestsForReview(t.Context(), 17)
+	require.NoError(t, err)
+	require.Equal(t, []PullRequest{{RepositoryID: 12, Number: 23}}, pulls)
+
+	changed.Store(true)
+	pulls, err = client.ListPullRequestsForReview(t.Context(), 17)
+	require.NoError(t, err)
+	require.Equal(t, []PullRequest{{RepositoryID: 16, Number: 23}, {RepositoryID: 17, Number: 23}}, pulls)
+	_, err = client.repository(12)
+	require.ErrorIs(t, err, ErrRepositoryOutsideScope)
+
+	limited := &Client{http: server.Client(), origin: server.URL, viewer: client.viewer,
+		names: []string{"otherorg/newrepo"}}
+	pulls, err = limited.ListPullRequestsForReview(t.Context(), 17)
+	require.NoError(t, err)
+	require.Equal(t, []PullRequest{{RepositoryID: 16, Number: 23}}, pulls)
+}
