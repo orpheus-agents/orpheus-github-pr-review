@@ -1,6 +1,6 @@
 ---
 id: selected-repositories
-repository_ids: [10, 11, 13]
+repositories: [team/api, team/web, other-team/api]
 profile: review
 sandbox_template: github-review
 services: [github, redmine]
@@ -12,4 +12,4 @@ notes:
 
 # Repository review instructions
 
-Add the review rules for repositories 10, 11 and 13 here.
+Add the review rules for these repositories here.

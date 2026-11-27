@@ -60,8 +60,8 @@ var (
 )
 
 type ReconcilerConfig struct {
-	NotesForRepository func(repositoryID int64) review.NoteTemplates
-	MatchesWorkflow    func(repositoryID int64) bool
+	NotesForRepository func(repositoryName string) review.NoteTemplates
+	MatchesWorkflow    func(repositoryName string) bool
 	WorkerCount        int
 	QueueCapacity      int
 	MaxConcurrent      int
@@ -108,8 +108,8 @@ type Reconciler struct {
 	orpheus            orpheusAdapter
 	buildContract      SessionContractBuilder
 	publisher          ReviewPublisher
-	matchesWorkflow    func(repositoryID int64) bool
-	notesForRepository func(repositoryID int64) review.NoteTemplates
+	matchesWorkflow    func(repositoryName string) bool
+	notesForRepository func(repositoryName string) review.NoteTemplates
 	workerCount        int
 	maxConcurrent      int
 	queue              chan review.Snapshot
@@ -639,7 +639,7 @@ func (r *Reconciler) inspectCandidate(ctx context.Context, input review.Input) (
 		}
 	}
 
-	if r.matchesWorkflow != nil && !r.matchesWorkflow(input.PullRequest.RepositoryID) {
+	if r.matchesWorkflow != nil && !r.matchesWorkflow(input.Repository.FullName) {
 		if r.publisher == nil {
 			return false, lifecycleError(LifecyclePhasePublish, "publisher_not_configured", false, errors.New("skip publication requires a publisher"))
 		}
@@ -903,7 +903,7 @@ func ineligibilityReasons(reasons []review.IneligibilityReason) []string {
 func (r *Reconciler) failureNotes(ctx context.Context, input review.Input, session orpheus.Session) (review.NoteTemplates, error) {
 	if session.ID == "" {
 		if r.notesForRepository != nil {
-			return r.notesForRepository(input.PullRequest.RepositoryID), nil
+			return r.notesForRepository(input.Repository.FullName), nil
 		}
 		return review.NoteTemplates{}, nil
 	}
