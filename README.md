@@ -9,4 +9,7 @@
 
 # orpheus-github-pr-review
 
-A CLI connector for reviewing GitHub pull requests with Orpheus. In development.
+A CLI connector for reviewing GitHub pull requests with Orpheus.
+
+- [Configuration and operation](docs/configuration.md)
+- [Workflow examples](examples/workflows/)

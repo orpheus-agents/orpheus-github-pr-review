@@ -1,0 +1,10 @@
+services:
+  review:
+    image: retailcrm/orpheus-github-pr-review:0.1.0
+    init: true
+    env_file: .env
+    environment:
+      WORKFLOWS_DIR: /var/app/workflows
+    volumes:
+      - ./workflows:/var/app/workflows:ro
+    stop_grace_period: 30s
