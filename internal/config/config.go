@@ -261,24 +261,19 @@ var repositoryName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*/[a-zA-Z0-9_.-
 
 func parseRepositories(value string) ([]string, error) {
 	if strings.TrimSpace(value) == "" {
-		return nil, errors.New("GITHUB_REPOSITORIES is required")
+		return nil, nil
 	}
 	seen := map[string]bool{}
 	var repositories []string
-	var owner string
 	for item := range strings.SplitSeq(value, ",") {
 		name := strings.ToLower(strings.TrimSpace(item))
 		if !repositoryName.MatchString(name) {
 			return nil, errors.New("GITHUB_REPOSITORIES must contain owner/repo names")
 		}
-		currentOwner, repo, _ := strings.Cut(name, "/")
+		_, repo, _ := strings.Cut(name, "/")
 		if repo == "." || repo == ".." || seen[name] {
 			return nil, errors.New("GITHUB_REPOSITORIES must contain unique valid repository names")
 		}
-		if owner != "" && currentOwner != owner {
-			return nil, errors.New("GITHUB_REPOSITORIES must have a single owner")
-		}
-		owner = currentOwner
 		repositories = append(repositories, name)
 		seen[name] = true
 	}

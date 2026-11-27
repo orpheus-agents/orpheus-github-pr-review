@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,7 +26,7 @@ const apiVersion = "2022-11-28"
 const maxResponseBytes = 16 << 20
 
 var ErrReviewInputChanged = errors.New("pull request changed while loading review input")
-var ErrRepositoryOutsideScope = errors.New("repository is outside the configured GitHub scope")
+var ErrRepositoryOutsideScope = errors.New("repository is outside the current GitHub review scope")
 var ErrRateLimited = errors.New("GitHub API rate limit reached")
 
 type responseError struct {
@@ -51,13 +52,14 @@ func IsRetryable(err error) bool {
 	return ok
 }
 
-// Client uses one token for the control plane. The repository catalog and viewer
-// are initialized by the watcher before it sends the first snapshot.
+// The watcher sets the viewer at startup and refreshes the repository catalog
+// on each poll. The reconciler can read the catalog concurrently.
 type Client struct {
 	origin       string
 	token        string
 	names        []string
 	http         *http.Client
+	repositoryMu sync.RWMutex
 	repositories []Repository
 	viewer       User
 	retryAt      atomic.Int64
@@ -85,41 +87,53 @@ func (c *Client) CurrentUser(ctx context.Context) (User, error) {
 	if viewer.ID <= 0 || strings.TrimSpace(viewer.Username) == "" {
 		return User{}, errors.New("invalid authenticated GitHub user")
 	}
+	c.viewer = viewer
+	return viewer, nil
+}
 
-	repositories := make([]Repository, 0, len(c.names))
-	for _, name := range c.names {
-		var item struct {
-			ID       int64  `json:"id"`
-			FullName string `json:"full_name"`
-			CloneURL string `json:"clone_url"`
-			WebURL   string `json:"html_url"`
-			Archived bool   `json:"archived"`
-			Owner    struct {
-				Type string `json:"type"`
-			} `json:"owner"`
-			Permissions struct {
-				Push bool `json:"push"`
-			} `json:"permissions"`
+type repositoryResponse struct {
+	ID          int64  `json:"id"`
+	FullName    string `json:"full_name"`
+	CloneURL    string `json:"clone_url"`
+	WebURL      string `json:"html_url"`
+	Archived    bool   `json:"archived"`
+	Disabled    bool   `json:"disabled"`
+	Permissions struct {
+		Push bool `json:"push"`
+	} `json:"permissions"`
+}
+
+func (c *Client) refreshRepositories(ctx context.Context) ([]Repository, error) {
+	items, err := listREST[repositoryResponse](ctx, c, "/user/repos")
+	if err != nil {
+		return nil, err
+	}
+	repositories := make([]Repository, 0, len(items))
+	seen := make(map[int64]bool, len(items))
+	for _, item := range items {
+		if item.Archived || item.Disabled || !item.Permissions.Push || seen[item.ID] ||
+			(len(c.names) > 0 && !slices.Contains(c.names, strings.ToLower(item.FullName))) {
+			continue
 		}
-		if err := c.json(ctx, http.MethodGet, "/repos/"+name, nil, &item); err != nil {
-			return User{}, err
+		owner, name, qualified := strings.Cut(item.FullName, "/")
+		if item.ID <= 0 || !qualified || owner == "" || name == "" || strings.Contains(name, "/") ||
+			item.CloneURL != "https://github.com/"+item.FullName+".git" {
+			return nil, errors.New("invalid GitHub review repository identity")
 		}
-		if item.ID <= 0 || !strings.EqualFold(item.FullName, name) || item.Archived || item.Owner.Type != "Organization" || !item.Permissions.Push {
-			return User{}, fmt.Errorf("GitHub repository %s must be an active organization repository with write access for the reviewer", name)
-		}
-		if item.CloneURL != "https://github.com/"+item.FullName+".git" {
-			return User{}, fmt.Errorf("unexpected HTTPS clone URL for GitHub repository %s", name)
-		}
+		seen[item.ID] = true
 		repositories = append(repositories, Repository{
 			ID: item.ID, FullName: item.FullName, CloneURL: item.CloneURL, WebURL: item.WebURL,
 		})
 	}
-	c.viewer = viewer
+	c.repositoryMu.Lock()
 	c.repositories = repositories
-	return viewer, nil
+	c.repositoryMu.Unlock()
+	return repositories, nil
 }
 
 func (c *Client) repository(id int64) (Repository, error) {
+	c.repositoryMu.RLock()
+	defer c.repositoryMu.RUnlock()
 	for _, repo := range c.repositories {
 		if repo.ID == id {
 			return repo, nil
