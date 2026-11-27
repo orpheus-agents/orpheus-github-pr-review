@@ -267,7 +267,7 @@ func TestReconcilerContinuesFailedSessionAfterReviewFingerprintChanges(t *testin
 	reconciler := NewReconciler(zap.NewNop(), nil, client, func(review.Input) (workflow.SessionContract, error) {
 		t.Fatal("an existing assignment must not start another analysis")
 		return workflow.SessionContract{}, nil
-	}, ReconcilerConfig{Publisher: publisher, MatchesWorkflow: func(int64) bool { t.Fatal("old assignment must not select a new workflow"); return false }})
+	}, ReconcilerConfig{Publisher: publisher, MatchesWorkflow: func(string) bool { t.Fatal("old assignment must not select a new workflow"); return false }})
 
 	err := reconciler.Reconcile(t.Context(), current)
 
@@ -439,7 +439,7 @@ func TestReconcilerValidatesCompletedBundleAgainstImmutableMetadata(t *testing.T
 	reconciler := NewReconciler(zap.New(core), nil, client, func(review.Input) (workflow.SessionContract, error) {
 		t.Fatal("completed session must not build a new contract")
 		return workflow.SessionContract{}, nil
-	}, ReconcilerConfig{Publisher: publisher, MatchesWorkflow: func(int64) bool {
+	}, ReconcilerConfig{Publisher: publisher, MatchesWorkflow: func(string) bool {
 		t.Fatal("accepted session must be recovered even after workflow removal")
 		return false
 	}})

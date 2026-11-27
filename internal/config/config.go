@@ -259,6 +259,12 @@ func parseBaseURL(name, value string) (string, error) {
 
 var repositoryName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*/[a-zA-Z0-9_.-]+$`)
 
+// ValidRepositoryName reports whether name is a GitHub owner/repo name.
+func ValidRepositoryName(name string) bool {
+	_, repo, _ := strings.Cut(name, "/")
+	return repositoryName.MatchString(name) && repo != "." && repo != ".."
+}
+
 func parseRepositories(value string) ([]string, error) {
 	if strings.TrimSpace(value) == "" {
 		return nil, nil
@@ -267,11 +273,10 @@ func parseRepositories(value string) ([]string, error) {
 	var repositories []string
 	for item := range strings.SplitSeq(value, ",") {
 		name := strings.ToLower(strings.TrimSpace(item))
-		if !repositoryName.MatchString(name) {
+		if !ValidRepositoryName(name) {
 			return nil, errors.New("GITHUB_REPOSITORIES must contain owner/repo names")
 		}
-		_, repo, _ := strings.Cut(name, "/")
-		if repo == "." || repo == ".." || seen[name] {
+		if seen[name] {
 			return nil, errors.New("GITHUB_REPOSITORIES must contain unique valid repository names")
 		}
 		repositories = append(repositories, name)

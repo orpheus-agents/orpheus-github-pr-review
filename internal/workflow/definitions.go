@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/orpheus-agents/orpheus-github-pr-review/internal/config"
 	"github.com/orpheus-agents/orpheus-github-pr-review/internal/review"
 	"go.yaml.in/yaml/v3"
 )
@@ -19,7 +20,7 @@ import (
 // Definition contains user-owned execution settings and review instructions.
 type Definition struct {
 	ID              string               `yaml:"id"`
-	RepositoryIDs   []int64              `yaml:"repository_ids"`
+	Repositories    []string             `yaml:"repositories"`
 	Profile         string               `yaml:"profile"`
 	Model           string               `yaml:"model"`
 	SandboxTemplate string               `yaml:"sandbox_template"`
@@ -32,7 +33,7 @@ type Definition struct {
 // Set is an immutable collection with unambiguous repository ownership.
 type Set struct {
 	definitions  []Definition
-	repositories map[int64]int
+	repositories map[string]int
 	defaultIndex int
 }
 
@@ -55,7 +56,7 @@ func Load(directory string, maxBytes int) (Set, error) {
 	if err != nil {
 		return Set{}, fmt.Errorf("load workflows directory %q: %w", directory, err)
 	}
-	set := Set{repositories: map[int64]int{}, defaultIndex: -1}
+	set := Set{repositories: map[string]int{}, defaultIndex: -1}
 	ids := map[string]string{}
 	for _, entry := range entries {
 		name := entry.Name()
@@ -76,17 +77,18 @@ func Load(directory string, maxBytes int) (Set, error) {
 		}
 		ids[definition.ID] = path
 		index := len(set.definitions)
-		if len(definition.RepositoryIDs) == 0 {
+		if len(definition.Repositories) == 0 {
 			if set.defaultIndex >= 0 {
 				return Set{}, fmt.Errorf("workflow %q: multiple default workflows (%s and %s)", path, set.definitions[set.defaultIndex].ID, definition.ID)
 			}
 			set.defaultIndex = index
 		}
-		for _, id := range definition.RepositoryIDs {
-			if previous, exists := set.repositories[id]; exists {
-				return Set{}, fmt.Errorf("workflow %q: repository_id %d is already assigned to workflow %s", path, id, set.definitions[previous].ID)
+		for _, repository := range definition.Repositories {
+			name := strings.ToLower(repository)
+			if previous, exists := set.repositories[name]; exists {
+				return Set{}, fmt.Errorf("workflow %q: repository %q is already assigned to workflow %s", path, repository, set.definitions[previous].ID)
 			}
-			set.repositories[id] = index
+			set.repositories[name] = index
 		}
 		set.definitions = append(set.definitions, definition)
 	}
@@ -96,11 +98,11 @@ func Load(directory string, maxBytes int) (Set, error) {
 	return set, nil
 }
 
-func (s Set) Select(repositoryID int64) (Definition, bool) {
-	if len(s.definitions) == 0 || repositoryID <= 0 {
+func (s Set) Select(repositoryName string) (Definition, bool) {
+	if len(s.definitions) == 0 || repositoryName == "" {
 		return Definition{}, false
 	}
-	index, found := s.repositories[repositoryID]
+	index, found := s.repositories[strings.ToLower(repositoryName)]
 	if !found {
 		index = s.defaultIndex
 	}
@@ -108,7 +110,7 @@ func (s Set) Select(repositoryID int64) (Definition, bool) {
 		return Definition{}, false
 	}
 	definition := s.definitions[index]
-	definition.RepositoryIDs = slices.Clone(definition.RepositoryIDs)
+	definition.Repositories = slices.Clone(definition.Repositories)
 	definition.Services = slices.Clone(definition.Services)
 	return definition, true
 }
@@ -171,8 +173,8 @@ func parseDefinition(content []byte) (Definition, error) {
 	return definition, nil
 }
 
-func (s Set) NotesForRepository(repositoryID int64) review.NoteTemplates {
-	definition, _ := s.Select(repositoryID)
+func (s Set) NotesForRepository(repositoryName string) review.NoteTemplates {
+	definition, _ := s.Select(repositoryName)
 	return definition.Notes
 }
 
@@ -222,16 +224,13 @@ func decodeFrontMatter(content []byte, target any) (string, error) {
 				if value.Tag != "!!str" {
 					return "", fmt.Errorf("%s must be a string", key)
 				}
-			case "repository_ids", "services":
+			case "repositories", "services":
 				if value.Kind != yaml.SequenceNode {
 					return "", fmt.Errorf("%s must be a list", key)
 				}
 				for _, item := range value.Content {
-					if key == "services" && item.Tag != "!!str" {
-						return "", errors.New("services must contain strings")
-					}
-					if key == "repository_ids" && item.Tag != "!!int" {
-						return "", errors.New("repository_ids must contain integers")
+					if item.Tag != "!!str" {
+						return "", fmt.Errorf("%s must contain strings", key)
 					}
 				}
 			}
@@ -267,15 +266,16 @@ func (d *Definition) validate() error {
 		}
 		seenServices[code] = true
 	}
-	if d.RepositoryIDs != nil && len(d.RepositoryIDs) == 0 {
-		return errors.New("repository_ids must be non-empty when present; omit it for a default workflow")
+	if d.Repositories != nil && len(d.Repositories) == 0 {
+		return errors.New("repositories must be non-empty when present; omit it for a default workflow")
 	}
-	seenRepositorys := map[int64]bool{}
-	for _, id := range d.RepositoryIDs {
-		if id <= 0 || seenRepositorys[id] {
-			return errors.New("repository_ids must contain unique positive IDs")
+	seenRepositories := map[string]bool{}
+	for _, repository := range d.Repositories {
+		name := strings.ToLower(repository)
+		if !config.ValidRepositoryName(repository) || seenRepositories[name] {
+			return errors.New("repositories must contain unique owner/repo names")
 		}
-		seenRepositorys[id] = true
+		seenRepositories[name] = true
 	}
 	if d.Language != "" && !languagePattern.MatchString(d.Language) {
 		return errors.New("language must be a language tag, such as en, ru or pt-BR")

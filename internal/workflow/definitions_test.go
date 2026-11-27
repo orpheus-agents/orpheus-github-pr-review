@@ -16,11 +16,11 @@ func writeWorkflow(t *testing.T, dir, name, content string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
 }
 
-func TestLoadWorkflowsRoutesRepositorysAndSnapshotsInstructions(t *testing.T) {
+func TestLoadWorkflowsRoutesRepositoriesAndSnapshotsInstructions(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	fallback := testFrontMatter + "---\n\nFallback rules.\n"
-	special := strings.Replace(testFrontMatter, "id: review", "id: special", 1) + "repository_ids: [10, 11, 13]\nmodel: custom-model\nlanguage: ru\n---\n\nSpecial rules.\n"
+	special := strings.Replace(testFrontMatter, "id: review", "id: special", 1) + "repositories: [team/api, Team/web, other-team/api]\nmodel: custom-model\nlanguage: ru\n---\n\nSpecial rules.\n"
 	writeWorkflow(t, dir, "a-default.md", fallback)
 	writeWorkflow(t, dir, "z-special.md", special)
 	writeWorkflow(t, dir, ".temporary.md", "invalid")
@@ -28,27 +28,27 @@ func TestLoadWorkflowsRoutesRepositorysAndSnapshotsInstructions(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "nested.md"), 0o700))
 	workflows, err := Load(dir, 4096)
 	require.NoError(t, err)
-	for _, id := range []int64{10, 11, 13} {
-		selected, ok := workflows.Select(id)
+	for _, name := range []string{"team/api", "team/web", "Other-Team/API"} {
+		selected, ok := workflows.Select(name)
 		require.True(t, ok)
 		require.Equal(t, "special", selected.ID)
 		require.Equal(t, "\nSpecial rules.\n", selected.Instructions)
 		require.Equal(t, "ru", selected.Language)
 		require.Equal(t, "custom-model", selected.Model)
 		selected.Services[0] = "mutated"
-		selected.RepositoryIDs[0] = 99
+		selected.Repositories[0] = "other/value"
 	}
-	for _, id := range []int64{1, 12, 99} {
-		selected, ok := workflows.Select(id)
+	for _, name := range []string{"team/another", "other-team/web", "third-team/api"} {
+		selected, ok := workflows.Select(name)
 		require.True(t, ok)
 		require.Equal(t, "review", selected.ID)
 		require.Empty(t, selected.Language)
 	}
 	writeWorkflow(t, dir, "z-special.md", "invalid changed file")
-	selected, ok := workflows.Select(10)
+	selected, ok := workflows.Select("team/api")
 	require.True(t, ok)
 	require.Equal(t, []string{"github"}, selected.Services)
-	require.Equal(t, []int64{10, 11, 13}, selected.RepositoryIDs)
+	require.Equal(t, []string{"team/api", "Team/web", "other-team/api"}, selected.Repositories)
 	require.Equal(t, "\nSpecial rules.\n", selected.Instructions)
 	_, err = Load(dir, 4096)
 	require.ErrorContains(t, err, "z-special.md")
@@ -57,18 +57,18 @@ func TestLoadWorkflowsRoutesRepositorysAndSnapshotsInstructions(t *testing.T) {
 func TestLoadWorkflowsWithoutFallbackAndWithEmptyServices(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	content := strings.Replace(testFrontMatter, "[github]", "[]", 1) + "repository_ids: [10]\n---\r\nInstructions\r\n"
+	content := strings.Replace(testFrontMatter, "[github]", "[]", 1) + "repositories: [team/api]\n---\r\nInstructions\r\n"
 	writeWorkflow(t, dir, "review.md", content)
 	workflows, err := Load(dir, 4096)
 	require.NoError(t, err)
-	selected, ok := workflows.Select(10)
+	selected, ok := workflows.Select("team/api")
 	require.True(t, ok)
 	require.NotNil(t, selected.Services)
 	require.Empty(t, selected.Services)
 	require.Equal(t, "Instructions\r\n", selected.Instructions)
-	_, ok = workflows.Select(11)
+	_, ok = workflows.Select("team/web")
 	require.False(t, ok)
-	_, ok = (Set{}).Select(10)
+	_, ok = (Set{}).Select("team/api")
 	require.False(t, ok)
 }
 
@@ -78,7 +78,7 @@ func TestLoadWorkflowsRejectsInvalidDefinitionsAtomically(t *testing.T) {
 	cases := map[string]string{
 		"empty file":             "",
 		"boolean service":        strings.Replace(valid, "[github]", "[true]", 1),
-		"fractional repository":  testFrontMatter + "repository_ids: [1.5]\n---\nInstructions",
+		"numeric repository":     testFrontMatter + "repositories: [1]\n---\nInstructions",
 		"missing front matter":   "Instructions",
 		"unclosed":               testFrontMatter + "Instructions",
 		"unknown key":            testFrontMatter + "timeout: 10\n---\nInstructions",
@@ -91,12 +91,12 @@ func TestLoadWorkflowsRejectsInvalidDefinitionsAtomically(t *testing.T) {
 		"null services":          strings.Replace(valid, "[github]", "null", 1),
 		"duplicate services":     strings.Replace(valid, "[github]", "[github, github]", 1),
 		"invalid service":        strings.Replace(valid, "[github]", "[GitHub]", 1),
-		"selector scalar":        testFrontMatter + "repository_ids: 10\n---\nInstructions",
-		"empty selector":         testFrontMatter + "repository_ids: []\n---\nInstructions",
-		"null selector":          testFrontMatter + "repository_ids: null\n---\nInstructions",
-		"duplicate repositories": testFrontMatter + "repository_ids: [10, 10]\n---\nInstructions",
-		"negative repository":    testFrontMatter + "repository_ids: [-1]\n---\nInstructions",
-		"zero repository":        testFrontMatter + "repository_ids: [0]\n---\nInstructions",
+		"selector scalar":        testFrontMatter + "repositories: team/api\n---\nInstructions",
+		"empty selector":         testFrontMatter + "repositories: []\n---\nInstructions",
+		"null selector":          testFrontMatter + "repositories: null\n---\nInstructions",
+		"duplicate repositories": testFrontMatter + "repositories: [team/api, Team/API]\n---\nInstructions",
+		"unqualified repository": testFrontMatter + "repositories: [api]\n---\nInstructions",
+		"invalid repository":     testFrontMatter + "repositories: [team/..]\n---\nInstructions",
 		"invalid language":       testFrontMatter + "language: Russian please\n---\nInstructions",
 		"non-string profile":     strings.Replace(valid, "profile: review-profile", "profile: 10", 1),
 		"empty body":             testFrontMatter + "---\n \n",
@@ -109,7 +109,7 @@ func TestLoadWorkflowsRejectsInvalidDefinitionsAtomically(t *testing.T) {
 			writeWorkflow(t, dir, "bad.md", content)
 			workflows, err := Load(dir, 4096)
 			require.ErrorContains(t, err, "bad.md")
-			_, ok := workflows.Select(10)
+			_, ok := workflows.Select("team/api")
 			require.False(t, ok, "partial configuration must not escape on failure")
 		})
 	}
@@ -118,9 +118,9 @@ func TestLoadWorkflowsRejectsInvalidDefinitionsAtomically(t *testing.T) {
 func TestLoadWorkflowsRejectsAmbiguousRouting(t *testing.T) {
 	t.Parallel()
 	cases := map[string][2]string{
-		"duplicate id":      {testFrontMatter + "repository_ids: [10]\n", testFrontMatter + "repository_ids: [11]\n"},
+		"duplicate id":      {testFrontMatter + "repositories: [team/api]\n", testFrontMatter + "repositories: [team/web]\n"},
 		"multiple fallback": {testFrontMatter, strings.Replace(testFrontMatter, "id: review", "id: other", 1)},
-		"overlap":           {testFrontMatter + "repository_ids: [10,11]\n", strings.Replace(testFrontMatter, "id: review", "id: other", 1) + "repository_ids: [11,13]\n"},
+		"overlap":           {testFrontMatter + "repositories: [team/api, team/web]\n", strings.Replace(testFrontMatter, "id: review", "id: other", 1) + "repositories: [Team/Web, other-team/api]\n"},
 	}
 	for name, files := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -200,12 +200,12 @@ func TestDocumentedWorkflowExamplesLoad(t *testing.T) {
 	t.Parallel()
 	workflows, err := Load("../../examples/workflows", 4096)
 	require.NoError(t, err)
-	for _, id := range []int64{10, 11, 13} {
-		selected, ok := workflows.Select(id)
+	for _, name := range []string{"team/api", "team/web", "Other-Team/API"} {
+		selected, ok := workflows.Select(name)
 		require.True(t, ok)
 		require.Equal(t, "selected-repositories", selected.ID)
 	}
-	selected, ok := workflows.Select(14)
+	selected, ok := workflows.Select("team/another")
 	require.True(t, ok)
 	require.Equal(t, "default-review", selected.ID)
 }

@@ -33,13 +33,17 @@ the same bytes and head SHA. Fork pull requests use the target repository's
 ## Workflows
 
 A workflow is a Markdown file with YAML front matter. The body contains the agent's review
-instructions. Use [the default example](../examples/workflows/default.md) to review all configured
-repositories. Set `repository_ids` to direct a workflow to specific numeric GitHub repository IDs.
-Explicit routes take priority over the one optional default workflow.
+instructions. Use [the default example](../examples/workflows/default.md) for all repositories in
+scope. To give specific repositories their own instructions, set
+[`repositories`](../examples/workflows/projects.md) to their `owner/repo` names.
+The connector matches the base repository case-insensitively. One optional workflow without
+`repositories` applies to the remaining repositories. If a repository changes owner or name,
+update the list.
 
 | Field | Purpose |
 | --- | --- |
 | `id` | Stable workflow identifier |
+| `repositories` | Optional list of repository names, such as `[team/api, team/web]` |
 | `profile`, `model` | Orpheus profile and optional model override |
 | `sandbox_template` | Orpheus sandbox template |
 | `services` | Explicit sandbox service codes, such as `[github]` |

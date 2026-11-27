@@ -39,7 +39,7 @@ func TestFailedSessionUsesSavedNotesAfterWorkflowChanges(t *testing.T) {
 			reconciler := NewReconciler(zap.NewNop(), nil, client, func(review.Input) (workflow.SessionContract, error) {
 				t.Fatal("existing session must not create a new contract")
 				return workflow.SessionContract{}, nil
-			}, ReconcilerConfig{Publisher: publisher, NotesForRepository: func(int64) review.NoteTemplates {
+			}, ReconcilerConfig{Publisher: publisher, NotesForRepository: func(string) review.NoteTemplates {
 				t.Fatal("accepted session must not use current workflow templates")
 				return review.NoteTemplates{}
 			}})
@@ -87,8 +87,8 @@ func TestBuildFailureUsesSelectedWorkflowFailureNote(t *testing.T) {
 	notes := review.NoteTemplates{Fail: "Environment could not be prepared"}
 	reconciler := NewReconciler(zap.NewNop(), nil, &orpheusMock{}, func(review.Input) (workflow.SessionContract, error) {
 		return workflow.SessionContract{}, errors.New("private build error")
-	}, ReconcilerConfig{Publisher: publisher, NotesForRepository: func(repositoryID int64) review.NoteTemplates {
-		require.Equal(t, input.PullRequest.RepositoryID, repositoryID)
+	}, ReconcilerConfig{Publisher: publisher, NotesForRepository: func(repositoryName string) review.NoteTemplates {
+		require.Equal(t, input.Repository.FullName, repositoryName)
 		return notes
 	}})
 	require.NoError(t, reconciler.Reconcile(t.Context(), input))

@@ -72,7 +72,7 @@ func New(cfg config.Config) (*App, error) {
 		gitHubClient,
 		orpheusClient,
 		func(input review.Input) (workflow.SessionContract, error) {
-			definition, ok := workflows.Select(input.PullRequest.RepositoryID)
+			definition, ok := workflows.Select(input.Repository.FullName)
 			if !ok {
 				return workflow.SessionContract{}, errors.New("no workflow configured for repository")
 			}
@@ -80,7 +80,7 @@ func New(cfg config.Config) (*App, error) {
 		},
 		connector.ReconcilerConfig{
 			NotesForRepository: workflows.NotesForRepository,
-			MatchesWorkflow:    func(repositoryID int64) bool { _, ok := workflows.Select(repositoryID); return ok },
+			MatchesWorkflow:    func(repositoryName string) bool { _, ok := workflows.Select(repositoryName); return ok },
 			WorkerCount:        cfg.ReconcileWorkerCount,
 			QueueCapacity:      cfg.ReconcileQueueCapacity,
 			MaxConcurrent:      cfg.MaxConcurrentReviews,
